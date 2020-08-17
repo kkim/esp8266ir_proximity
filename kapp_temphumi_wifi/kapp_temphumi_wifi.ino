@@ -1,6 +1,6 @@
 #include "k_sensor.h"
 
-#define  K_SENSOR_TYPE_TO_USE  K_SENSOR_TYPE_TEMPHUM
+#define  K_SENSOR_TYPE_TO_USE  K_SENSOR_TYPE_DHT22
 #define  K_OUTPUT_TYPE_TO_USE  K_OUTPUT_TYPE_HTTP
 
 // * k_wifi_secrets.h defines
@@ -12,11 +12,6 @@
 
 #include "k_baseclass.h"
 
-// Enable light sleep: https://efcomputer.net.au/blog/esp8266-light-sleep-mode/
-extern "C" {
-   #include "gpio.h"
-   #include "user_interface.h"
-}
 
 // Main loop
 Output* output;
@@ -30,7 +25,8 @@ void setup()
   output = new Output();
   sensor = new Sensor();
 
-  //output->connect();
+  //output->connected();
+  //output->printMACAddress();
   output->setFreqInSecond(20);
   output->setMaxCount(60);
 
@@ -38,12 +34,26 @@ void setup()
   t_problem_count_to_report=10;
 }
 
+float concat2temp_dht11(float th)
+{
+  return (float)((int)th/100);
+}
+float concat2temp_dht22(float th)
+{
+  return (float)((int)th/1000)/10-40;
+}
+
 void loop()
 {
   k_dataval val = sensor->read(K_DATAKEY_TEMPHUM);
-  output->write(K_DATAKEY_TEMPHUM, val);
 
-  float T = val/100;
+#if(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT11)
+  output->write(K_DATAKEY_TEMPHUM, val);
+  float T = concat2temp_dht11(val);
+#elif(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT22)
+  output->write(K_DATAKEY_TEMPHUM_DHT22, val);
+  float T = concat2temp_dht22(val);
+#endif
   if(T>8.0f && T<18.0f)
   {
     t_problem_counter++;
@@ -56,10 +66,11 @@ void loop()
   
 
   //https://github.com/esp8266/Arduino/issues/1381
-  wifi_fpm_set_sleep_type(LIGHT_SLEEP_T); // set sleep type, the above    posters wifi_set_sleep_type() didnt seem to work for me although it did let me compile and upload with no errors 
+  //wifi_fpm_set_sleep_type(LIGHT_SLEEP_T); // set sleep type, the above    posters wifi_set_sleep_type() didnt seem to work for me although it did let me compile and upload with no errors 
+  delay(10);
   // * Regular sleep
   delay(output->getFreqInSecond()*1000);
-  wifi_fpm_set_sleep_type(NONE_SLEEP_T); // set sleep type, the above    posters wifi_set_sleep_type() didnt seem to work for me although it did let me compile and upload with no errors 
+  //wifi_fpm_set_sleep_type(NONE_SLEEP_T); // set sleep type, the above    posters wifi_set_sleep_type() didnt seem to work for me although it did let me compile and upload with no errors 
 
   // * Deep sleep uses about 20uA of power. However, it restarts the whole thing. 
   //ESP.deepSleep(output->getFreqInSecond()*1000);

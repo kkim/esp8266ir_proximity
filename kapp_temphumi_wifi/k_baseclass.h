@@ -1,6 +1,13 @@
 #ifndef _K_BASE_CLASS_H_
 #define _K_BASE_CLASS_H_
 
+// Enable light sleep: https://efcomputer.net.au/blog/esp8266-light-sleep-mode/
+extern "C" {
+   #include "gpio.h"
+   #include "user_interface.h"
+}
+#define RTCMEMORYSTART 65
+
 // Default sensor is none (=toggler)
 class BaseSensor
 {
@@ -24,7 +31,7 @@ class BaseSensor
 
 #if(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_NONE)
 typedef BaseSensor Sensor;
-#elif(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_TEMPHUM)
+#elif(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT11 || K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT22)
 #include <dht.h>
 #define dht_apin 5
 
@@ -40,8 +47,11 @@ class TempHumSensor: public BaseSensor
 
     k_dataval read(k_datakey key)
     {
+#if(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT11)
       _dht.read11(dht_apin);
-
+#elif(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT22)
+      _dht.read22(dht_apin);
+#endif
       switch (key)
       {
         case K_DATAKEY_TEMPERATURE:
@@ -49,12 +59,48 @@ class TempHumSensor: public BaseSensor
         case K_DATAKEY_HUMIDITY:
           return _dht.humidity;
         case K_DATAKEY_TEMPHUM:
+#if(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT11)
           return _dht.temperature*100+_dht.humidity*1;
+#elif(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT22)
+          return (_dht.temperature+40)*10000+_dht.humidity*10;
+#endif
       }
       return K_STATUS_OK;
     }
 };
 typedef TempHumSensor Sensor;
+#elif(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_PMS7003)
+#import "PMS.h"
+
+class PMSensor: public BaseSensor
+{
+  private:
+    PMS _pms;
+
+  public:
+    PMSensor(): BaseSensor("PM Sensor","PM") {
+    }
+
+    k_dataval read(k_datakey key)
+    {
+      _dht.read11(dht_apin);
+      switch (key)
+      {
+        case K_DATAKEY_PMS7003:
+          return _dht.temperature;
+        case K_DATAKEY_HUMIDITY:
+          return _dht.humidity;
+        case K_DATAKEY_TEMPHUM:
+#if(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT11)
+          return _dht.temperature*100+_dht.humidity*1;
+#elif(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT22)
+          return (_dht.temperature+40)*10000+_dht.humidity*10;
+#endif
+      }
+      return K_STATUS_OK;
+    }
+};
+typedef PMSensor Sensor;
 #endif
 
 // Default ouptut is LED
@@ -70,6 +116,7 @@ class BaseOutput
       Serial.begin(9600);
     }
     ~BaseOutput() {}
+    virtual void printMACAddress(){}
     virtual k_status write(k_datakey key, k_dataval val)
     {
       Serial.println("BaseOutput");
@@ -117,7 +164,7 @@ class HTTPOutput: BaseOutput
       }
     
       Serial.println("Connected");
-      this->connected();
+      //this->connected();
     }
 
 
@@ -158,6 +205,8 @@ Serial.println(url);
     }
     ~HTTPOutput() {}
 
+    void printMACAddress(){      Serial.println(wMACAddress);}
+
     int getFreqInSecond()const {return freq_in_second;}
     void setFreqInSecond(int f){freq_in_second=f;}
     void setMaxCount(int c){max_count=c;}
@@ -167,17 +216,56 @@ Serial.println(url);
       return wifi_get((serverURL + "?key=" + wMACAddress + "&"+message).c_str());
     }
 
-    k_status write(k_datakey key, k_dataval val) 
+    k_status write_to_wifi_rtc(const char* fmt, int val)
     {
-      digitalWrite(LED_BUILTIN, HIGH);
-      delay(10);
-      digitalWrite(LED_BUILTIN, LOW);
+      int rtc_count;
+      system_rtc_mem_read(RTCMEMORYSTART, &rtc_count, sizeof(rtc_count));
+      if (rtc_count<0 || rtc_count>this->max_count) rtc_count = 0;
+      count = rtc_count;
 
-      Serial.println(String("TH:")+val);
+      // Write new val to RTC memory
+      system_rtc_mem_write(RTCMEMORYSTART+sizeof(rtc_count)+sizeof(val)*count, &val, sizeof(val));
+      //count: number of values in RTC
+      count++;
+        
+      if(count==max_count)
+      {
+        // Submit to wifi
+        catStr=String("");
+        for(int ii = 0; ii<max_count; ++ii)
+        {
+          int rtc_val;
+          catStr+=",";
+          system_rtc_mem_read(RTCMEMORYSTART+sizeof(rtc_count)+sizeof(rtc_val)*ii, &rtc_val, sizeof(rtc_val));
+          catStr+=rtc_val;
+        }
+        write_to_server((String("value=")+fmt+":"+catStr).c_str());
+        WiFi.mode( WIFI_OFF );
+        
+        // Set counter to 0
+        count=0;
+      }
+      rtc_count = count;
+      system_rtc_mem_write(RTCMEMORYSTART, &rtc_count, sizeof(rtc_count));
+
+      ESP.deepSleep(freq_in_second*1000*1000);
+      delay(1);
+    }
+
+    k_status write_to_wifi(const char* fmt, int val)
+    {
+      Serial.println(String(fmt)+":"+val);
 
       if(count==max_count)
       {
-        write_to_server((String("value=TH:")+catStr).c_str());
+        WiFi.forceSleepWake();          
+        delay(1);
+        write_to_server((String("value=")+fmt+":"+catStr).c_str());
+        // Modem sleep
+        WiFi.mode( WIFI_OFF );
+        WiFi.forceSleepBegin();
+        delay(1);
+        
         catStr="";
         count=0;
       }
@@ -187,6 +275,24 @@ Serial.println(url);
         catStr+=(int)val;
         count++;
 Serial.println(String("count: ")+count);
+      }
+    }
+
+    k_status write(k_datakey key, k_dataval val) 
+    {
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(10);
+      digitalWrite(LED_BUILTIN, LOW);
+
+      if(key==K_DATAKEY_TEMPHUM)
+      {
+        //write_to_wifi("TH", val);
+        write_to_wifi_rtc("TH", val);
+      }
+      else if(key==K_DATAKEY_TEMPHUM_DHT22)
+      {
+        //write_to_wifi("TH2", val);
+        write_to_wifi_rtc("TH2", val);
       }
       return K_STATUS_OK;
     }
@@ -223,4 +329,3 @@ typedef HTTPOutput Output;
 #endif
 
 #endif// _K_BASE_CLASS_H_
-
