@@ -45,6 +45,11 @@ float concat2temp_dht22(float th)
 
 void loop()
 {
+  // Wait for 0.5 second to stabilize the sensor. 
+  // Reduce measuring frequency by 0.5 second.
+  delay(500);
+  output->setFreqInSecond(19.5);
+  
   k_dataval val = sensor->read(K_DATAKEY_TEMPHUM);
 
 #if(K_SENSOR_TYPE_TO_USE==K_SENSOR_TYPE_DHT11)

@@ -143,7 +143,7 @@ class HTTPOutput: BaseOutput
     String serverCertFingerprint = WIFI_SERVER_CERT_FP;
     int count;
     int max_count;
-    int freq_in_second;
+    float freq_in_second;
     String catStr;
     int _isAsleep;
 
@@ -207,8 +207,8 @@ Serial.println(url);
 
     void printMACAddress(){      Serial.println(wMACAddress);}
 
-    int getFreqInSecond()const {return freq_in_second;}
-    void setFreqInSecond(int f){freq_in_second=f;}
+    float getFreqInSecond()const {return freq_in_second;}
+    void setFreqInSecond(float f){freq_in_second=f;}
     void setMaxCount(int c){max_count=c;}
 
     k_status write_to_server(const char* message)
@@ -248,7 +248,7 @@ Serial.println(url);
       rtc_count = count;
       system_rtc_mem_write(RTCMEMORYSTART, &rtc_count, sizeof(rtc_count));
 
-      ESP.deepSleep(freq_in_second*1000*1000);
+      ESP.deepSleep((int)(freq_in_second*1000*1000));
       delay(1);
     }
 
