@@ -6,7 +6,8 @@ extern "C" {
    #include "gpio.h"
    #include "user_interface.h"
 }
-#define RTCMEMORYSTART 65
+
+#include "k_persistent.h"
 
 // Default sensor is none (=toggler)
 class BaseSensor
@@ -134,6 +135,7 @@ extern "C" {
   //#include "user_interface.h"
   //#include "wifi_connection_info.h"
 }
+    KPersistentRTC _kp;
 
 class HTTPOutput: BaseOutput
 {
@@ -146,6 +148,8 @@ class HTTPOutput: BaseOutput
     float freq_in_second;
     String catStr;
     int _isAsleep;
+    //KPersistentRTC _kp;
+    //KPersistentLittleFS _kp;
 
     k_status connect()
     {
@@ -181,7 +185,7 @@ class HTTPOutput: BaseOutput
 
         // https://techtutorialsx.com/2016/07/17/esp8266-http-get-requests/
         http.begin(url, serverCertFingerprint.c_str());
-        int httpCode = http.GET();                                                                  //Send the request
+        int httpCode = http.GET(); //Send the request
 Serial.println(url);
         if (httpCode > 0) { //Check the returning code
           String payload = http.getString();   //Get the request response payload
@@ -202,6 +206,9 @@ Serial.println(url);
     HTTPOutput():count(0),catStr(""),max_count(60), freq_in_second(20), _isAsleep(0)
     {
       wMACAddress.replace(":", "_");
+      this->printMACAddress();
+
+      _kp.init(61*sizeof(int));
     }
     ~HTTPOutput() {}
 
@@ -219,12 +226,19 @@ Serial.println(url);
     k_status write_to_wifi_rtc(const char* fmt, int val)
     {
       int rtc_count;
-      system_rtc_mem_read(RTCMEMORYSTART, &rtc_count, sizeof(rtc_count));
+      // Read counter
+      //system_rtc_mem_read(RTCMEMORYSTART, &rtc_count, sizeof(rtc_count));
+      _kp.read(0, &rtc_count, sizeof(rtc_count));
+Serial.println(String("count: ")+rtc_count);
+
+      
       if (rtc_count<0 || rtc_count>this->max_count) rtc_count = 0;
       count = rtc_count;
 
       // Write new val to RTC memory
-      system_rtc_mem_write(RTCMEMORYSTART+sizeof(rtc_count)+sizeof(val)*count, &val, sizeof(val));
+      //system_rtc_mem_write(RTCMEMORYSTART+sizeof(rtc_count)+sizeof(val)*count, &val, sizeof(val));
+      _kp.write(sizeof(rtc_count)+sizeof(val)*count, &val, sizeof(val));
+
       //count: number of values in RTC
       count++;
         
@@ -236,7 +250,9 @@ Serial.println(url);
         {
           int rtc_val;
           catStr+=",";
-          system_rtc_mem_read(RTCMEMORYSTART+sizeof(rtc_count)+sizeof(rtc_val)*ii, &rtc_val, sizeof(rtc_val));
+          // Real all recorded values
+          //system_rtc_mem_read(RTCMEMORYSTART+sizeof(rtc_count)+sizeof(rtc_val)*ii, &rtc_val, sizeof(rtc_val));
+          _kp.read(sizeof(rtc_count)+sizeof(rtc_val)*ii, &rtc_val, sizeof(rtc_val));
           catStr+=rtc_val;
         }
         write_to_server((String("value=")+fmt+":"+catStr).c_str());
@@ -246,7 +262,12 @@ Serial.println(url);
         count=0;
       }
       rtc_count = count;
-      system_rtc_mem_write(RTCMEMORYSTART, &rtc_count, sizeof(rtc_count));
+      // Update counter
+      //system_rtc_mem_write(RTCMEMORYSTART, &rtc_count, sizeof(rtc_count));
+      _kp.write(0, &rtc_count, sizeof(rtc_count));
+Serial.println(String("writing count: ")+rtc_count);
+      _kp.read(0, &rtc_count, sizeof(rtc_count));
+Serial.println(String("wrote count: ")+rtc_count);
 
       ESP.deepSleep((int)(freq_in_second*1000*1000));
       delay(1);

@@ -48,7 +48,7 @@ void loop()
   // Wait for 0.5 second to stabilize the sensor. 
   // Reduce measuring frequency by 0.5 second.
   delay(500);
-  output->setFreqInSecond(19.5);
+  output->setFreqInSecond(output->getFreqInSecond()-0.5);
   
   k_dataval val = sensor->read(K_DATAKEY_TEMPHUM);
 
